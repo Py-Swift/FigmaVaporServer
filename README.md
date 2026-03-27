@@ -13,7 +13,7 @@ Vapor server that receives Figma node JSON from the [figma4kivy](https://github.
 swift run
 ```
 
-Server starts on `http://localhost:8080`.
+Server starts on `http://localhost:8765`.
 
 ## Endpoints
 
