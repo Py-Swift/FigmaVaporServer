@@ -1,5 +1,5 @@
 {
-  "originHash" : "33df8697f4317e40fd79db005c328b2329f083ac4b6bb667922bffdf61538fe2",
+  "originHash" : "f716898b471a2062605f8f61ae3a7a7c877b75ed432950e20dd05db15aa95c1c",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "742f624a998cba2a9e653d9b1e91ad3f3a5dff6b",
         "version" : "4.15.2"
+      }
+    },
+    {
+      "identity" : "figma2kv",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Py-Swift/Figma2Kv.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "6ef51a6cb3156c32053335c871159ad8762df1fe"
       }
     },
     {
