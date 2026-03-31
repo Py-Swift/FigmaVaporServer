@@ -74,6 +74,30 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
+          body: |
+            ## Downloads
+
+            | Asset | Platform |
+            |---|---|
+            | `FigmaVaporServer-arm64.tar.gz` | Apple Silicon (M1 / M2 / M3 / M4) |
+            | `FigmaVaporServer-x86_64.tar.gz` | Intel Mac |
+
+            ### Install
+
+            ```bash
+            # Apple Silicon
+            curl -LO https://github.com/Py-Swift/FigmaVaporServer/releases/download/${{ github.ref_name }}/FigmaVaporServer-arm64.tar.gz
+            tar -xzf FigmaVaporServer-arm64.tar.gz
+            ./FigmaVaporServer
+
+            # Intel
+            curl -LO https://github.com/Py-Swift/FigmaVaporServer/releases/download/${{ github.ref_name }}/FigmaVaporServer-x86_64.tar.gz
+            tar -xzf FigmaVaporServer-x86_64.tar.gz
+            ./FigmaVaporServer
+            ```
+
+            Server starts on `http://localhost:8765`.
           files: |
             FigmaVaporServer-arm64.tar.gz
             FigmaVaporServer-x86_64.tar.gz
