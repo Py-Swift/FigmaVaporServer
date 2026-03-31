@@ -13,6 +13,10 @@ public func configure(_ app: Application) throws {
     )
     app.middleware.use(CORSMiddleware(configuration: corsConfig), at: .beginning)
 
+    // Serve static files from Public/ (WASM binaries, runtime JS, etc.)
+    let publicDir = app.directory.workingDirectory + "Public"
+    app.middleware.use(FileMiddleware(publicDirectory: publicDir))
+
     app.http.server.configuration.port = 8765
 
     try routes(app)

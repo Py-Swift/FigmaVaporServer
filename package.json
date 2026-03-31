@@ -1,0 +1,9 @@
+{
+  "name": "figma-vapor-server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:wasm",
+    "build:wasm": "./FigmaPluginPages/build-wasm.sh"
+  }
+}

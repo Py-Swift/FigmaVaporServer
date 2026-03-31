@@ -1,0 +1,94 @@
+openapi: "3.1.0"
+info:
+  title: FigmaVaporServer API
+  version: 1.0.0
+paths:
+  /canvas-py:
+    get:
+      operationId: getCanvasPage
+      summary: Serve the Canvas Py editor page
+      responses:
+        "200":
+          description: HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      operationId: convertCanvasPy
+      summary: Convert Figma nodes to canvas Python
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CanvasPyRequest"
+      responses:
+        "200":
+          description: Generated Python code
+          content:
+            text/plain:
+              schema:
+                type: string
+        "422":
+          description: Conversion failed
+          content:
+            text/plain:
+              schema:
+                type: string
+  /canvas-py/push:
+    post:
+      operationId: pushCanvasNodes
+      summary: Push raw Figma nodes; server converts and broadcasts via SSE
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+      responses:
+        "200":
+          description: Accepted
+  /canvas-py/stream:
+    get:
+      operationId: streamCanvasPy
+      summary: SSE stream of converted Python — emits on every push
+      responses:
+        "200":
+          description: Server-sent events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /canvas-py/last:
+    get:
+      operationId: lastCanvasPy
+      summary: Return the last converted Python code
+      responses:
+        "200":
+          description: Last generated Python
+          content:
+            text/plain:
+              schema:
+                type: string
+        "204":
+          description: Nothing converted yet
+components:
+  schemas:
+    CanvasPyRequest:
+      type: object
+      required:
+        - nodes
+      properties:
+        scalable:
+          type: boolean
+          default: false
+        kivy:
+          type: boolean
+          default: false
+        nodes:
+          type: array
+          items:
+            type: object

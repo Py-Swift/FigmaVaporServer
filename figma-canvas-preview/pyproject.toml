@@ -1,0 +1,20 @@
+[project]
+name = "figma-canvas-preview"
+version = "0.1.0"
+description = "Live preview for figma2kv canvas-py output"
+readme = "README.md"
+authors = [
+    { name = "Py-Swift", email = "psychowaspx@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "kivy-reloader>=0.8.5",
+    "requests>=2.32",
+]
+
+[project.scripts]
+preview = "figma_canvas_preview:main"
+
+[build-system]
+requires = ["uv_build>=0.10.12,<0.11.0"]
+build-backend = "uv_build"
