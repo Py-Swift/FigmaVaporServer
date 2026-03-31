@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # ── arm64 (Apple Silicon) ──────────────────────────────────────────────────
+  build-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build (release, arm64)
+        run: |
+          swift build -c release --arch arm64 2>&1
+
+      - name: Archive
+        run: |
+          tar -czf FigmaVaporServer-arm64.tar.gz \
+            -C .build/arm64-apple-macosx/release FigmaVaporServer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FigmaVaporServer-arm64
+          path: FigmaVaporServer-arm64.tar.gz
+
+  # ── x86_64 (Intel) ────────────────────────────────────────────────────────
+  build-x86_64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build (release, x86_64)
+        run: |
+          swift build -c release --arch x86_64 2>&1
+
+      - name: Archive
+        run: |
+          tar -czf FigmaVaporServer-x86_64.tar.gz \
+            -C .build/x86_64-apple-macosx/release FigmaVaporServer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FigmaVaporServer-x86_64
+          path: FigmaVaporServer-x86_64.tar.gz
+
+  # ── Create GitHub release + attach both assets ────────────────────────────
+  release:
+    needs: [build-arm64, build-x86_64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download arm64
+        uses: actions/download-artifact@v4
+        with:
+          name: FigmaVaporServer-arm64
+
+      - name: Download x86_64
+        uses: actions/download-artifact@v4
+        with:
+          name: FigmaVaporServer-x86_64
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            FigmaVaporServer-arm64.tar.gz
+            FigmaVaporServer-x86_64.tar.gz
