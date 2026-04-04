@@ -45,6 +45,7 @@ struct CanvasRoutes: RouteCollection {
             let code = CanvasDesigner.generate(nodes: nodes, scalable: body.scalable ?? false, smooth: smooth)
             await CanvasPyCache.shared.store(code)
             if await CanvasKivyClients.shared.hasAny() { await CanvasReloader.shared.reload(code: code) }
+            if await DeviceReloader.shared.isRunning() { await DeviceReloader.shared.reload(code: code) }
             await CanvasStream.shared.broadcast(code)
             return Response(status: .ok, body: .init(string: code))
         }
@@ -62,6 +63,7 @@ struct CanvasRoutes: RouteCollection {
             await CanvasPyCache.shared.store(code)
             await CanvasStream.shared.broadcast(code)
             if await CanvasKivyClients.shared.hasAny() { await CanvasReloader.shared.reload(code: code) }
+            if await DeviceReloader.shared.isRunning() { await DeviceReloader.shared.reload(code: code) }
             return Response(status: .ok)
         }
 
@@ -92,8 +94,51 @@ struct CanvasRoutes: RouteCollection {
         routes.get("canvas-py", "kivy-status") { req -> Response in
             struct KivyStatus: Content { var running: Bool; var url: String? }
             let running = await CanvasReloader.shared.isRunning()
-            let url = await CanvasReloader.shared.noVncUrl()
+            // Return a server-relative URL so only Vapor's port needs to be exposed.
+            let url: String? = running
+                ? "/vnc-proxy/vnc.html?autoconnect=true&resize=scale&path=websockify"
+                : nil
             return try Response(status: .ok, body: .init(data: JSONEncoder().encode(KivyStatus(running: running, url: url))))
+        }
+
+        // ── noVNC reverse proxy ───────────────────────────────────────────────
+        // Proxies HTTP (static assets) and WebSocket (VNC tunnel) so only
+        // port 8765 needs to be reachable — noVNC stays on localhost.
+
+        routes.get("vnc-proxy", .catchall) { req async throws -> Response in
+            guard let port = await CanvasReloader.shared.noVncPort() else {
+                return Response(status: .serviceUnavailable)
+            }
+            let path  = req.parameters.getCatchall().joined(separator: "/")
+            let query = req.url.query.map { "?\($0)" } ?? ""
+            let upstream = URI(string: "http://127.0.0.1:\(port)/\(path)\(query)")
+            let clientResp = try await req.client.get(upstream)
+            let resp = Response(status: clientResp.status, headers: clientResp.headers)
+            if let body = clientResp.body { resp.body = .init(buffer: body) }
+            return resp
+        }
+
+        routes.webSocket("vnc-proxy", "websockify") { req, clientWs async in
+            guard let port = await CanvasReloader.shared.noVncPort() else {
+                try? await clientWs.close(code: .unexpectedServerError)
+                return
+            }
+            // Bridge client WebSocket to the local noVNC websockify endpoint.
+            // serverWs callbacks are registered on serverWs's event loop (we're already there).
+            // clientWs callbacks must be registered on clientWs's event loop — hop to it.
+            _ = try? await WebSocket.connect(
+                to: "ws://127.0.0.1:\(port)/websockify",
+                on: req.application.eventLoopGroup
+            ) { serverWs in
+                serverWs.onBinary { _, buf in clientWs.send(raw: buf.readableBytesView, opcode: .binary) }
+                serverWs.onText  { _, txt in clientWs.send(txt) }
+                serverWs.onClose.whenComplete { _ in _ = clientWs.close() }
+                clientWs.eventLoop.execute {
+                    clientWs.onBinary { _, buf in serverWs.send(raw: buf.readableBytesView, opcode: .binary) }
+                    clientWs.onText  { _, txt in serverWs.send(txt) }
+                    clientWs.onClose.whenComplete { _ in _ = serverWs.close() }
+                }
+            }.get()
         }
 
         routes.get("canvas-py", "last") { req -> Response in

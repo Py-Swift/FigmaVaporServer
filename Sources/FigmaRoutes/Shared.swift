@@ -71,9 +71,6 @@ actor CanvasKivyClients {
 
     func unregister() {
         count = max(0, count - 1)
-        if count == 0 {
-            Task { await CanvasReloader.shared.stop() }
-        }
     }
 
     func hasAny() -> Bool { count > 0 }

@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let local = false
@@ -12,9 +12,11 @@ let package = Package(
     platforms: [.macOS(.v15)],
     dependencies: [
         .package(url: "https://github.com/vapor/vapor.git", from: "4.102.0"),
+        .package(url: "https://github.com/vapor/websocket-kit.git", from: "2.0.0"),
         figma2Kv,
-        .package(path: "VaporKivyReloader"),
-        .package(path: "FigmaPluginUI"),
+        .package(path: "packages/VaporKivyReloader"),
+        .package(path: "packages/FigmaPluginUI"),
+        .package(path: "packages/ServerFontManager"),
         .package(url: "https://github.com/elementary-swift/elementary.git", from: "0.6.0"),
         .package(url: "https://github.com/vapor-community/vapor-elementary.git", from: "0.1.0"),
         .package(url: "https://github.com/apple/swift-openapi-generator.git", from: "1.0.0"),
@@ -33,6 +35,8 @@ let package = Package(
                 .product(name: "VaporElementary", package: "vapor-elementary"),
                 .product(name: "FigmaPluginUI", package: "FigmaPluginUI"),
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+                .product(name: "WebSocketKit", package: "websocket-kit"),
+                .product(name: "ServerFontManager", package: "ServerFontManager"),
             ],
             plugins: [
                 .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),

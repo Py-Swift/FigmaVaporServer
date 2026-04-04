@@ -214,9 +214,22 @@ public struct CanvasPage: HTMLDocument {
             };
             es.onerror = () => { if (!kivyToggle.checked) status.textContent = 'stream error'; };
 
+            // Upload image bytes to the server, then forward figmaNodes for conversion.
+            async function uploadImages(images) {
+                if (!images?.length) return;
+                await Promise.all(images.map(img =>
+                    fetch('/image/' + img.hash, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/octet-stream' },
+                        body: new Uint8Array(img.bytes)
+                    })
+                ));
+            }
+
             // Forward raw figmaNodes to server — server converts and broadcasts back
-            window.addEventListener('message', e => {
+            window.addEventListener('message', async e => {
                 if (e.data?.type !== 'figmaNodes') return;
+                await uploadImages(e.data.images);
                 if (debugToggle.checked) {
                     status.textContent = 'Dumping JSON...';
                     fetch('/canvas-py/json-dump', {

@@ -22,7 +22,7 @@ public struct LabPage: HTMLDocument {
         }
         script {
             HTMLRaw("""
-            const ws = new WebSocket(`ws://${location.host}/ws`);
+            const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
             ws.onmessage = e => log(e.data);
 
             function log(msg) {

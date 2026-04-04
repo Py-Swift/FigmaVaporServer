@@ -1,3 +1,12 @@
 .build/
+**/.swiftpm/
 *.o
 *.d
+
+# TLS certificates — generated locally, never commit
+cert.pem
+key.pem
+rootCA.pem
+.DS_Store
+*.dia
+*.swiftdeps
