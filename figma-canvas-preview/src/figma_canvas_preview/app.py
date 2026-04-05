@@ -1,6 +1,6 @@
 import importlib
 import trio
-from kivy_reloader.app import App
+from kivy.app import App
 
 
 class CanvasPreviewApp(App):
