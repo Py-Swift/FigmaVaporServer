@@ -1,5 +1,5 @@
 import Vapor
-import Figma2Kv
+import FigmaTranslator
 import KivyCanvasDesigner
 import VaporKivyReloader
 import Elementary
@@ -51,18 +51,40 @@ struct CanvasRoutes: RouteCollection {
         }
 
         routes.post("canvas-py", "push") { req -> Response in
-            let scalable         = (try? req.query.get(Bool.self, at: "scalable"))         ?? false
-            let smoothRectangle        = (try? req.query.get(Bool.self, at: "smoothRectangle"))        ?? false
-            let smoothRoundedRectangle = (try? req.query.get(Bool.self, at: "smoothRoundedRectangle")) ?? true
-            let smoothEllipse          = (try? req.query.get(Bool.self, at: "smoothEllipse"))          ?? true
-            let smoothTriangle         = (try? req.query.get(Bool.self, at: "smoothTriangle"))         ?? true
-            let smoothLine             = (try? req.query.get(Bool.self, at: "smoothLine"))             ?? true
+            let scalable                   = (try? req.query.get(Bool.self,   at: "scalable"))                   ?? false
+            let smoothRectangle            = (try? req.query.get(Bool.self,   at: "smoothRectangle"))            ?? false
+            let smoothRoundedRectangle     = (try? req.query.get(Bool.self,   at: "smoothRoundedRectangle"))     ?? true
+            let smoothEllipse              = (try? req.query.get(Bool.self,   at: "smoothEllipse"))              ?? true
+            let smoothTriangle             = (try? req.query.get(Bool.self,   at: "smoothTriangle"))             ?? true
+            let smoothLine                 = (try? req.query.get(Bool.self,   at: "smoothLine"))                 ?? true
+            let locked                     = (try? req.query.get(Bool.self,   at: "locked"))                     ?? false
+            let frameWidth                 = (try? req.query.get(Int.self,    at: "width"))                      ?? 0
+            let frameHeight                = (try? req.query.get(Int.self,    at: "height"))                     ?? 0
             let nodes = try req.content.decode([FigmaNode].self)
             let smooth = SmoothOptions(rectangle: smoothRectangle, roundedRectangle: smoothRoundedRectangle, ellipse: smoothEllipse, triangle: smoothTriangle, line: smoothLine)
-            let code = CanvasDesigner.generate(nodes: nodes, scalable: scalable, smooth: smooth)
+            var code = CanvasDesigner.generate(nodes: nodes, scalable: scalable, smooth: smooth)
+
+            // Phase 2: prepend companion .py file when root node is a named page.
+            if let rootName = nodes.first?.name,
+               let (_, filePath) = FigmaPageFile.parse(rootName),
+               await AppContext.shared.hasPyProject,
+               let pySource = await AppContext.shared.readPyFile(at: filePath) {
+                code = pySource + "\n\n" + code
+            }
             await CanvasPyCache.shared.store(code)
             await CanvasStream.shared.broadcast(code)
-            if await CanvasKivyClients.shared.hasAny() { await CanvasReloader.shared.reload(code: code) }
+            if await CanvasKivyClients.shared.hasAny() {
+                let sizeChanged = await CanvasWindowSize.shared.update(width: frameWidth, height: frameHeight)
+                let action = (locked && !sizeChanged) ? "reload" : "resize+send \(frameWidth)×\(frameHeight)"
+                print("[canvas-push] locked=\(locked) \(frameWidth)×\(frameHeight) sizeChanged=\(sizeChanged) → \(action)")
+                if locked && !sizeChanged {
+                    // Lock on, same size → hot-reload only
+                    await CanvasReloader.shared.reload(code: code)
+                } else {
+                    // Lock off (new selection) or size changed → resize display + send with Window.size
+                    await CanvasReloader.shared.restart(code: code, width: frameWidth, height: frameHeight)
+                }
+            }
             if await DeviceReloader.shared.isRunning() { await DeviceReloader.shared.reload(code: code) }
             return Response(status: .ok)
         }
@@ -141,11 +163,58 @@ struct CanvasRoutes: RouteCollection {
             }.get()
         }
 
+        routes.get("canvas-py", "display-info") { req -> Response in
+            struct DisplayInfo: Content { var requested: String; var xrandr: String }
+            let (reqSize, xrandr) = await CanvasReloader.shared.displayInfo()
+            return try Response(status: .ok, body: .init(data: JSONEncoder().encode(DisplayInfo(requested: reqSize, xrandr: xrandr))))
+        }
+
+        routes.post("canvas-py", "lock") { req -> Response in
+            let enabled = (try? req.query.get(Bool.self, at: "enabled")) ?? false
+            await CanvasLockState.shared.set(enabled)
+            return Response(status: .ok)
+        }
+
+        routes.get("canvas-py", "lock-stream") { req -> Response in
+            var headers = HTTPHeaders()
+            headers.replaceOrAdd(name: .contentType, value: "text/event-stream")
+            headers.replaceOrAdd(name: .cacheControl, value: "no-cache")
+            headers.replaceOrAdd(name: "X-Accel-Buffering", value: "no")
+            let (stream, id) = await CanvasLockState.shared.subscribe()
+            let loop = req.eventLoop
+            let response = Response(headers: headers)
+            response.body = .init(stream: { writer in
+                Task {
+                    for await enabled in stream {
+                        let json = enabled ? "true" : "false"
+                        var buf = ByteBufferAllocator().buffer(capacity: 16)
+                        buf.writeString("data: \(json)\n\n")
+                        loop.execute { writer.write(.buffer(buf), promise: nil) }
+                    }
+                    loop.execute { writer.write(.end, promise: nil) }
+                    await CanvasLockState.shared.unsubscribe(id)
+                }
+            }, count: -1)
+            return response
+        }
+
         routes.get("canvas-py", "last") { req -> Response in
             guard let code = await CanvasPyCache.shared.fetch() else {
                 return Response(status: .noContent)
             }
             return Response(status: .ok, body: .init(string: code))
+        }
+
+        routes.get("status") { req -> Response in
+            struct ServerStatus: Content {
+                var workingDir: String
+                var hasPyProject: Bool
+            }
+            let status = ServerStatus(
+                workingDir:   await AppContext.shared.workingDirectory.path,
+                hasPyProject: await AppContext.shared.hasPyProject
+            )
+            return try Response(status: .ok, body: .init(data: JSONEncoder().encode(status)))
         }
     }
 }

@@ -1,11 +1,11 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-let local = false
+let local = true
 
-let figma2Kv: Package.Dependency = local
-    ? .package(path: "../Figma2Kv")
-    : .package(url: "https://github.com/Py-Swift/Figma2Kv.git", branch: "master")
+let figmaTranslator: Package.Dependency = local
+    ? .package(path: "../FigmaTranslator")
+    : .package(url: "https://github.com/Py-Swift/FigmaTranslator.git", branch: "master")
 
 let package = Package(
     name: "FigmaVaporServer",
@@ -13,7 +13,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/vapor/vapor.git", from: "4.102.0"),
         .package(url: "https://github.com/vapor/websocket-kit.git", from: "2.0.0"),
-        figma2Kv,
+        figmaTranslator,
         .package(path: "packages/VaporKivyReloader"),
         .package(path: "packages/FigmaPluginUI"),
         .package(path: "packages/ServerFontManager"),
@@ -28,8 +28,9 @@ let package = Package(
             name: "FigmaRoutes",
             dependencies: [
                 .product(name: "Vapor", package: "vapor"),
-                .product(name: "Figma2Kv", package: "Figma2Kv"),
-                .product(name: "KivyCanvasDesigner", package: "Figma2Kv"),
+                .product(name: "FigmaTranslator", package: "FigmaTranslator"),
+                .product(name: "KivyCanvasDesigner", package: "FigmaTranslator"),
+                .product(name: "KivyWidgetDesigner", package: "FigmaTranslator"),
                 .product(name: "VaporKivyReloader", package: "VaporKivyReloader"),
                 .product(name: "Elementary", package: "elementary"),
                 .product(name: "VaporElementary", package: "vapor-elementary"),

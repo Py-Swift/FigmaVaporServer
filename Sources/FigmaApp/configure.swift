@@ -24,6 +24,14 @@ public func configure(_ app: Application) throws {
     let lanIP = localLANAddresses().first ?? "localhost"
     app.logger.notice("Server:     http://\(lanIP):8765")
 
+    // Detect working directory and pyproject.toml at startup.
+    let ctx = AppContext.shared
+    Task {
+        let hasPy = await ctx.hasPyProject
+        let cwd   = await ctx.workingDirectory.path
+        app.logger.notice("Working dir: \(cwd) (pyproject.toml: \(hasPy ? "found" : "not found"))")
+    }
+
     BonjourAnnouncer.shared.start(port: 8765)
     Task { await DeviceReloader.shared.setLanIP(lanIP) }
 

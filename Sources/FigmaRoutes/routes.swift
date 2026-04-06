@@ -6,6 +6,7 @@ public func routes(_ app: Application) throws {
     try app.register(collection: SetupRoutes())
     try app.register(collection: KvRoutes())
     try app.register(collection: CanvasRoutes())
+    try app.register(collection: WidgetRoutes())
     try app.register(collection: CanvasPreviewRoutes())
     try app.register(collection: DevicePreviewRoutes())
     try app.register(collection: LabRoutes())

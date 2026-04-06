@@ -9,10 +9,10 @@ public actor CanvasReloader {
     private static let imageName     = "kivy-hot-reload"
     private static let containerName = "kivy-canvas-preview"
 
-    // workspace root: 5 levels up from this file → figma2kv/
+    // workspace root: 6 levels up from this file → figma2kv/
     private let workspaceRoot: URL = {
         var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { url = url.deletingLastPathComponent() }
+        for _ in 0..<6 { url = url.deletingLastPathComponent() }
         return url
     }()
 
@@ -75,11 +75,78 @@ public actor CanvasReloader {
         Task {
             do {
                 try await self.ensureSetup()
+                print("[CanvasReloader] Hot-reload (\(resolution.width)×\(resolution.height))")
                 try await self.sendCode(code)
             } catch {
-                print("[CanvasReloader] error: \(error)")
+                print("[CanvasReloader] reload error: \(error)")
             }
         }
+    }
+
+    /// Resize the virtual display and send new code with a `Window.size` / `Window.top` / `Window.left`
+    /// prepended so the Kivy window matches the Figma frame exactly, centred within the display.
+    public func restart(code: String, width: Int, height: Int) {
+        let w = width  > 0 ? width  : resolution.width
+        let h = height > 0 ? height : resolution.height
+        resolution = (width: w, height: h)
+        Task {
+            do {
+                try await self.ensureSetup()
+                // Pick the smallest standard monitor resolution that fits the frame.
+                let (dispW, dispH) = Self.displayResolution(for: w, h)
+                print("[CanvasReloader] frame=\(w)×\(h) → display=\(dispW)×\(dispH)")
+                try run("docker", ["exec", Self.containerName,
+                    "/bin/bash", "-c",
+                    "xrandr --display :99 --fb \(dispW)x\(dispH) 2>/dev/null; true"
+                ])
+                try await Task.sleep(for: .milliseconds(200))
+                // Centre the Kivy window within the display.
+                let offsetX = (dispW - w) / 2
+                let offsetY = (dispH - h) / 2
+                let sizedCode = """
+                    from kivy.core.window import Window
+                    Window.size = (\(w), \(h))
+                    Window.top = \(offsetY)
+                    Window.left = \(offsetX)
+
+                    """ + code
+                try await self.sendCode(sizedCode)
+            } catch {
+                print("[CanvasReloader] restart error: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Standard display resolution picker
+
+    private static let standardResolutions: [(Int, Int)] = [
+        ( 320,  240),
+        ( 640,  480),
+        ( 800,  600),
+        (1024,  600),
+        (1024,  768),
+        (1280,  720),
+        (1280,  800),
+        (1280, 1024),
+        (1366,  768),
+        (1440,  900),
+        (1600,  900),
+        (1600, 1024),
+        (1920, 1080),
+        (1920, 1200),
+        (2048, 1080),
+        (2048, 1536),
+        (2560, 1440),
+        (2560, 1600),
+        (2560, 2048),
+        (3200, 1800),
+        (3440, 1440),
+        (3840, 2160),
+    ]
+
+    /// Smallest standard resolution where dispW >= w AND dispH >= h.
+    private static func displayResolution(for w: Int, _ h: Int) -> (Int, Int) {
+        standardResolutions.first { $0.0 >= w && $0.1 >= h } ?? (3840, 2160)
     }
 
     // MARK: Private — setup
@@ -101,8 +168,6 @@ public actor CanvasReloader {
                 "-p", "127.0.0.1::5900",
                 "-p", "127.0.0.1::6080",
                 "-p", "127.0.0.1::7654",
-                "-e", "DISPLAY_WIDTH=\(resolution.width)",
-                "-e", "DISPLAY_HEIGHT=\(resolution.height)",
                 "-e", "FIGMA_SERVER_URL=http://host.docker.internal:8765",
                 "-e", "PYTHONUNBUFFERED=1",
                 Self.imageName
@@ -157,13 +222,31 @@ public actor CanvasReloader {
     // MARK: Private — Docker helpers
 
     private func buildImage() throws {
+        let fm = FileManager.default
+        // Write everything to a self-contained temp directory — no external file dependencies.
+        let buildDir = fm.temporaryDirectory.appendingPathComponent("kivy-canvas-build-\(UUID().uuidString)")
+        try fm.createDirectory(at: buildDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: buildDir) }
+
+        // 1. Write the embedded Dockerfile.
+        try Self.embeddedDockerfile.write(
+            to: buildDir.appendingPathComponent("Dockerfile"),
+            atomically: true, encoding: .utf8)
+
+        // 2. Write the embedded startup script.
+        try Self.embeddedStartScript.write(
+            to: buildDir.appendingPathComponent("start-vnc.sh"),
+            atomically: true, encoding: .utf8)
+
+        // 3. Copy the figma-kivy-previewer package into the build context as "fkp".
+        let fkpSrc = workspaceRoot.appendingPathComponent("figma-kivy-previewer/figma-kivy-previewer")
+        let fkpDst = buildDir.appendingPathComponent("fkp")
+        try fm.copyItem(at: fkpSrc, to: fkpDst)
+
+        print("[CanvasReloader] Building Docker image '\(Self.imageName)' from temp context…")
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["docker", "build", "--no-cache",
-                          "-t", Self.imageName,
-                          "-f", "kivy-reloader-vscode/Dockerfile",
-                          "."]
-        proc.currentDirectoryURL = workspaceRoot
+        proc.arguments = ["docker", "build", "--no-cache", "-t", Self.imageName, buildDir.path]
         proc.standardOutput = FileHandle.standardOutput
         proc.standardError  = FileHandle.standardError
         try proc.run()
@@ -172,6 +255,91 @@ public actor CanvasReloader {
             throw CanvasReloaderError.dockerBuildFailed
         }
         print("[CanvasReloader] Docker image '\(Self.imageName)' built.")
+    }
+
+    // MARK: - Embedded Docker assets
+
+    private static let embeddedDockerfile = #"""
+FROM python:3.13-slim
+
+RUN apt-get update && apt-get install -y \
+    xvfb x11vnc novnc websockify \
+    python3-dev libgl1 libgles2 \
+    libgstreamer1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    libmtdev1 libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 libsdl2-ttf-2.0-0 \
+    git curl ca-certificates xclip xsel procps \
+    x11-xserver-utils fontconfig \
+    fonts-noto-core fonts-roboto fonts-open-sans fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN pip install --no-cache-dir kivy pillow websockets
+
+COPY fkp /tmp/fkp
+RUN pip install --no-cache-dir /tmp/fkp && rm -rf /tmp/fkp
+
+WORKDIR /work
+
+ENV DISPLAY=:99
+ENV SDL_VIDEODRIVER=x11
+ENV PREVIEWER_IP=0.0.0.0
+ENV PREVIEWER_PORT=7654
+
+COPY start-vnc.sh /usr/local/bin/start-vnc.sh
+RUN chmod +x /usr/local/bin/start-vnc.sh
+
+EXPOSE 5900 6080 7654
+CMD ["/usr/local/bin/start-vnc.sh"]
+"""#
+
+    private static let embeddedStartScript = #"""
+#!/bin/bash
+set -e
+
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+
+echo "Starting Xvfb on display :99 at 3840x2160 (RandR ceiling)..."
+Xvfb :99 -screen 0 3840x2160x24 -ac +extension GLX +extension RANDR +render -noreset &
+XVFB_PID=$!
+sleep 2
+
+echo "Starting x11vnc..."
+x11vnc -display :99 -forever -shared -rfbport 5900 -nopw \
+    -xkb -ncache 0 -ncache_cr -noxdamage -noxfixes -noxcomposite \
+    -skip_lockkeys -speeds lan -wait 5 -defer 5 -progressive 0 -q &
+X11VNC_PID=$!
+sleep 2
+
+echo "Starting websockify (6080 -> 5900)..."
+websockify --web /usr/share/novnc 6080 localhost:5900 &
+WEBSOCKIFY_PID=$!
+
+echo "Starting figma-kivy-previewer on port ${PREVIEWER_PORT:-7654}..."
+figma-kivy-previewer &
+PREVIEWER_PID=$!
+
+cleanup() {
+    kill $XVFB_PID $X11VNC_PID $WEBSOCKIFY_PID $PREVIEWER_PID 2>/dev/null || true
+    rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+    exit 0
+}
+trap cleanup EXIT TERM INT
+wait -n
+exit $?
+"""#
+
+    /// Returns the server's requested resolution and the container's live xrandr state.
+    /// Hit GET /canvas-py/display-info to see if xrandr accepted the resize.
+    /// Note: xrandr --fb can only scale within the Xvfb starting resolution ceiling.
+    public func displayInfo() -> (requested: String, xrandr: String) {
+        let req = "\(resolution.width)×\(resolution.height)"
+        guard containerRunning() else { return (req, "container not running") }
+        let xrandr = (try? capture("docker", ["exec", Self.containerName,
+            "/bin/bash", "-c", "xrandr --display :99 2>/dev/null | head -6"
+        ])) ?? "(xrandr unavailable)"
+        return (req, xrandr.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private func imageExists() -> Bool {

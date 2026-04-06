@@ -1,9 +1,9 @@
 import Elementary
 
-public struct CanvasPage: HTMLDocument {
+public struct WidgetPage: HTMLDocument {
     public init() {}
 
-    public var title = "Canvas Py"
+    public var title = "Widget Py"
 
     public var head: some HTML {
         meta(.charset("UTF-8"))
@@ -69,7 +69,7 @@ public struct CanvasPage: HTMLDocument {
                 div(.id("kivyOverlay"), .class("absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900"), .custom(name: "style", value: "display:none")) {
                     #Text(.caption) { "Starting Docker container..." }
                     div(.class("w-48 h-1 bg-zinc-700 rounded-full overflow-hidden")) {
-                        div(.id("kivyProgress"), .class("h-full bg-blue-500 rounded-full"), .custom(name: "style", value: "width:0%;transition:width 0.4s")) {}
+                        div(.id("kivyProgress"), .class("h-full bg-teal-500 rounded-full"), .custom(name: "style", value: "width:0%;transition:width 0.4s")) {}
                     }
                     span(.id("kivyProgressLabel"), .class("text-xs text-zinc-500")) { "Building image (first run may take a few minutes)" }
                 }
@@ -96,20 +96,18 @@ public struct CanvasPage: HTMLDocument {
             const kivyProgress  = document.getElementById('kivyProgress');
             const kivyLabel     = document.getElementById('kivyProgressLabel');
 
-            // Stable per-tab ID so the server can track kivy subscriptions independently.
             const clientId = Math.random().toString(36).slice(2);
 
             lockToggle.addEventListener('change', () => {
-                fetch('/canvas-py/lock?enabled=' + lockToggle.checked, { method: 'POST' });
+                fetch('/widget-py/lock?enabled=' + lockToggle.checked, { method: 'POST' });
                 window.parent.postMessage({ type: 'setLock', enabled: lockToggle.checked }, '*');
             });
 
             // Sync lock toggle across all open browser instances (including background mode).
-            const lockStream = new EventSource('/canvas-py/lock-stream');
+            const lockStream = new EventSource('/widget-py/lock-stream');
             lockStream.onmessage = e => {
                 const enabled = JSON.parse(e.data);
                 lockToggle.checked = enabled;
-                // Relay to plugin code.ts so Safari-side lock/unlock reaches Figma.
                 window.parent.postMessage({ type: 'setLock', enabled }, '*');
             };
 
@@ -135,14 +133,14 @@ public struct CanvasPage: HTMLDocument {
             let kivyPollTimer = null;
 
             async function pollKivyStatus(attempt) {
-                const maxAttempts = 60; // 5 min at 5s intervals
+                const maxAttempts = 60;
                 if (attempt >= maxAttempts) {
                     status.textContent = 'Docker timed out';
                     kivyOverlay.style.display = 'none';
                     return;
                 }
                 try {
-                    const res = await fetch('/canvas-py/kivy-status');
+                    const res = await fetch('/widget-py/kivy-status');
                     const json = await res.json();
                     const pct = Math.min(95, 20 + attempt * 1.5);
                     kivyProgress.style.width = pct + '%';
@@ -159,13 +157,11 @@ public struct CanvasPage: HTMLDocument {
             }
 
             kivyToggle.addEventListener('change', async () => {
-                // Tell the server whether this client wants kivy so pushes trigger docker reload.
-                fetch('/canvas-py/kivy-register?id=' + clientId + '&enabled=' + kivyToggle.checked, { method: 'POST' });
+                fetch('/widget-py/kivy-register?id=' + clientId + '&enabled=' + kivyToggle.checked, { method: 'POST' });
                 if (kivyToggle.checked) {
                     editorEl.style.display = 'none';
                     kivyView.style.display = '';
-                    // Check immediately -- container might already be running
-                    const res = await fetch('/canvas-py/kivy-status');
+                    const res = await fetch('/widget-py/kivy-status');
                     const json = await res.json();
                     if (json.running && json.url) {
                         kivyFrame.src = json.url;
@@ -173,7 +169,6 @@ public struct CanvasPage: HTMLDocument {
                     } else {
                         kivyOverlay.style.display = '';
                         kivyProgress.style.width = '5%';
-                        // If there's a cached code, trigger first push to kick off container build
                         window.parent.postMessage({ type: 'convert' }, '*');
                         pollKivyStatus(0);
                     }
@@ -186,9 +181,8 @@ public struct CanvasPage: HTMLDocument {
                 }
             });
 
-            // Unregister when tab closes so the server stops reloading docker.
             window.addEventListener('beforeunload', () => {
-                navigator.sendBeacon('/canvas-py/kivy-register?id=' + clientId + '&enabled=false');
+                navigator.sendBeacon('/widget-py/kivy-register?id=' + clientId + '&enabled=false');
             });
 
             // ── Monaco ────────────────────────────────────────────────────────
@@ -217,14 +211,13 @@ public struct CanvasPage: HTMLDocument {
             });
 
             // Subscribe to server-pushed results
-            const es = new EventSource('/canvas-py/stream');
+            const es = new EventSource('/widget-py/stream');
             es.onmessage = e => {
                 window._editor?.setValue(JSON.parse(e.data));
                 if (!kivyToggle.checked) status.textContent = 'Updated.';
             };
             es.onerror = () => { if (!kivyToggle.checked) status.textContent = 'stream error'; };
 
-            // Upload image bytes to the server, then forward figmaNodes for conversion.
             async function uploadImages(images) {
                 if (!images?.length) return;
                 await Promise.all(images.map(img =>
@@ -236,7 +229,6 @@ public struct CanvasPage: HTMLDocument {
                 ));
             }
 
-            // Extract the first top-level frame's pixel dimensions from serialised nodes JSON.
             function getFrameSize(nodesJson) {
                 try {
                     const nodes = JSON.parse(nodesJson);
@@ -247,13 +239,12 @@ public struct CanvasPage: HTMLDocument {
                 return { width: 0, height: 0 };
             }
 
-            // Forward raw figmaNodes to server — server converts and broadcasts back
             window.addEventListener('message', async e => {
                 if (e.data?.type !== 'figmaNodes') return;
                 await uploadImages(e.data.images);
                 if (debugToggle.checked) {
                     status.textContent = 'Dumping JSON...';
-                    fetch('/canvas-py/json-dump', {
+                    fetch('/widget-py/json-dump', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: e.data.data
@@ -265,7 +256,7 @@ public struct CanvasPage: HTMLDocument {
                 }
                 if (!kivyToggle.checked) status.textContent = 'Converting...';
                 const { width, height } = getFrameSize(e.data.data);
-                fetch('/canvas-py/push?scalable=' + scaledToggle.checked
+                fetch('/widget-py/push?scalable=' + scaledToggle.checked
                     + '&smoothRectangle=' + smoothRectangleToggle.checked
                     + '&smoothRoundedRectangle=' + smoothRoundedRectangleToggle.checked
                     + '&smoothEllipse=' + smoothEllipseToggle.checked

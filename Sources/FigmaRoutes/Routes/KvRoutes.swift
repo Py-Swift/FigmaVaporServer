@@ -1,5 +1,5 @@
 import Vapor
-import Figma2Kv
+import FigmaTranslator
 import VaporKivyReloader
 
 struct KvRoutes: RouteCollection {
