@@ -236,6 +236,18 @@ public struct CanvasPage: HTMLDocument {
                 ));
             }
 
+            // Upload SVG strings for VECTOR nodes to the server.
+            async function uploadSvgs(svgs) {
+                if (!svgs?.length) return;
+                await Promise.all(svgs.map(svg =>
+                    fetch('/svg/' + encodeURIComponent(svg.id), {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'image/svg+xml' },
+                        body: svg.data
+                    })
+                ));
+            }
+
             // Extract the first top-level frame's pixel dimensions from serialised nodes JSON.
             function getFrameSize(nodesJson) {
                 try {
@@ -251,6 +263,7 @@ public struct CanvasPage: HTMLDocument {
             window.addEventListener('message', async e => {
                 if (e.data?.type !== 'figmaNodes') return;
                 await uploadImages(e.data.images);
+                await uploadSvgs(e.data.svgs);
                 if (debugToggle.checked) {
                     status.textContent = 'Dumping JSON...';
                     fetch('/canvas-py/json-dump', {
