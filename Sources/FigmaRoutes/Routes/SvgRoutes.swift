@@ -22,21 +22,7 @@ actor SvgStore {
 struct SvgRoutes: RouteCollection {
     func boot(routes: RoutesBuilder) throws {
 
-        // PUT /svg/:id — Figma plugin uploads SVG string for a VECTOR node.
-        routes.put("svg", ":id") { req async throws -> Response in
-            guard let id = req.parameters.get("id"), !id.isEmpty else {
-                throw Abort(.badRequest, reason: "Missing SVG id")
-            }
-            guard let body = req.body.data else {
-                throw Abort(.badRequest, reason: "Empty body")
-            }
-            let data = Data(body.readableBytesView)
-            await SvgStore.shared.store(data, for: id)
-            req.logger.info("[svg] stored \(id) (\(data.count) bytes)")
-            return Response(status: .noContent)
-        }
-
-        // GET /svg/:id — Container fetches SVG at preview time.
+        // GET /svg/:id — container fetches SVG at preview time (stored server-side during translation).
         routes.get("svg", ":id") { req async throws -> Response in
             guard let id = req.parameters.get("id"), !id.isEmpty else {
                 throw Abort(.badRequest, reason: "Missing SVG id")

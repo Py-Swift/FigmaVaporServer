@@ -42,7 +42,11 @@ struct CanvasRoutes: RouteCollection {
             let body = try req.content.decode(Body.self)
             let nodes = try JSONDecoder().decode([FigmaNode].self, from: Data(body.nodes.utf8))
             let smooth = SmoothOptions(rectangle: body.smoothRectangle ?? false, roundedRectangle: body.smoothRoundedRectangle ?? true, ellipse: body.smoothEllipse ?? true, triangle: body.smoothTriangle ?? true, line: body.smoothLine ?? true)
-            let code = CanvasDesigner.generate(nodes: nodes, scalable: body.scalable ?? false, smooth: smooth)
+            let frames = CanvasDesigner.mapToIR(nodes: nodes)
+            for (id, svg) in CanvasDesigner.extractSvgs(frames: frames) {
+                await SvgStore.shared.store(Data(svg.utf8), for: id)
+            }
+            let code = CanvasDesigner.generate(frames: frames, scalable: body.scalable ?? false, smooth: smooth)
             await CanvasPyCache.shared.store(code)
             if await CanvasKivyClients.shared.hasAny() { await CanvasReloader.shared.reload(code: code) }
             if await DeviceReloader.shared.isRunning() { await DeviceReloader.shared.reload(code: code) }
@@ -62,7 +66,11 @@ struct CanvasRoutes: RouteCollection {
             let frameHeight                = (try? req.query.get(Int.self,    at: "height"))                     ?? 0
             let nodes = try req.content.decode([FigmaNode].self)
             let smooth = SmoothOptions(rectangle: smoothRectangle, roundedRectangle: smoothRoundedRectangle, ellipse: smoothEllipse, triangle: smoothTriangle, line: smoothLine)
-            var code = CanvasDesigner.generate(nodes: nodes, scalable: scalable, smooth: smooth)
+            let frames = CanvasDesigner.mapToIR(nodes: nodes)
+            for (id, svg) in CanvasDesigner.extractSvgs(frames: frames) {
+                await SvgStore.shared.store(Data(svg.utf8), for: id)
+            }
+            var code = CanvasDesigner.generate(frames: frames, scalable: scalable, smooth: smooth)
 
             // Phase 2: prepend companion .py file when root node is a named page.
             if let rootName = nodes.first?.name,
