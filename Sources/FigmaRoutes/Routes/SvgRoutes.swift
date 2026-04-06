@@ -22,6 +22,19 @@ actor SvgStore {
 struct SvgRoutes: RouteCollection {
     func boot(routes: RoutesBuilder) throws {
 
+        // PUT /svg/:id — plugin uploads the real exportAsync SVG string, overwriting the vectorPaths fallback.
+        routes.put("svg", ":id") { req async throws -> HTTPStatus in
+            guard let id = req.parameters.get("id"), !id.isEmpty else {
+                throw Abort(.badRequest, reason: "Missing SVG id")
+            }
+            guard var buf = req.body.data, buf.readableBytes > 0 else {
+                throw Abort(.badRequest, reason: "Empty body")
+            }
+            let data = buf.readData(length: buf.readableBytes) ?? Data()
+            await SvgStore.shared.store(data, for: id)
+            return .noContent
+        }
+
         // GET /svg/:id — container fetches SVG at preview time (stored server-side during translation).
         routes.get("svg", ":id") { req async throws -> Response in
             guard let id = req.parameters.get("id"), !id.isEmpty else {

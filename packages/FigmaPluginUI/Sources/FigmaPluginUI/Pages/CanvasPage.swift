@@ -249,6 +249,19 @@ public struct CanvasPage: HTMLDocument {
 
             // Forward raw figmaNodes to server — server converts and broadcasts back
             window.addEventListener('message', async e => {
+                // ── SVG upload: plugin sends back exact exportAsync SVG strings ──────
+                if (e.data?.type === 'svgExports') {
+                    for (const { id, svg } of (e.data.exports ?? [])) {
+                        try {
+                            await fetch('/svg/' + encodeURIComponent(id), {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'image/svg+xml' },
+                                body: svg
+                            });
+                        } catch(_) {}
+                    }
+                    return;
+                }
                 if (e.data?.type !== 'figmaNodes') return;
                 await uploadImages(e.data.images);
                 if (debugToggle.checked) {
@@ -277,7 +290,13 @@ public struct CanvasPage: HTMLDocument {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: e.data.data
-                });
+                }).then(r => r.json()).then(resp => {
+                    // Ask the plugin to export real SVG strings for VECTOR nodes via exportAsync.
+                    const ids = resp.vectorNodeIds ?? [];
+                    if (ids.length > 0) {
+                        window.parent.postMessage({ type: 'exportSvgs', nodeIds: ids }, '*');
+                    }
+                }).catch(() => {});
             });
             """)
         }

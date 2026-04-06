@@ -67,9 +67,11 @@ struct CanvasRoutes: RouteCollection {
             let nodes = try req.content.decode([FigmaNode].self)
             let smooth = SmoothOptions(rectangle: smoothRectangle, roundedRectangle: smoothRoundedRectangle, ellipse: smoothEllipse, triangle: smoothTriangle, line: smoothLine)
             let frames = CanvasDesigner.mapToIR(nodes: nodes)
-            for (id, svg) in CanvasDesigner.extractSvgs(frames: frames) {
+            let svgPairs = CanvasDesigner.extractSvgs(frames: frames)
+            for (id, svg) in svgPairs {
                 await SvgStore.shared.store(Data(svg.utf8), for: id)
             }
+            let vectorNodeIds = svgPairs.map(\.nodeId)
             var code = CanvasDesigner.generate(frames: frames, scalable: scalable, smooth: smooth)
 
             // Phase 2: prepend companion .py file when root node is a named page.
@@ -94,7 +96,10 @@ struct CanvasRoutes: RouteCollection {
                 }
             }
             if await DeviceReloader.shared.isRunning() { await DeviceReloader.shared.reload(code: code) }
-            return Response(status: .ok)
+            // Return vector node IDs so the plugin can export exact SVG strings via exportAsync.
+            let idsJSON = (try? String(data: JSONEncoder().encode(vectorNodeIds), encoding: .utf8)) ?? "[]"
+            var hdrs = HTTPHeaders(); hdrs.replaceOrAdd(name: .contentType, value: "application/json")
+            return Response(status: .ok, headers: hdrs, body: .init(string: "{\"vectorNodeIds\":\(idsJSON)}"))
         }
 
         routes.post("canvas-py", "json-dump") { req -> Response in
