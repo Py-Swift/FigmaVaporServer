@@ -54,6 +54,9 @@ public struct CanvasPage: HTMLDocument {
                             }
                         }
                     }
+                    a(.href("/canvas-py/debug-export"), .custom(name: "target", value: "_blank"), .class("text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 select-none cursor-pointer")) {
+                        "Export ↗"
+                    }
                     span(.id("status"), .class("text-xs text-zinc-500 ml-auto")) { "Waiting for selection..." }
                 }
             }

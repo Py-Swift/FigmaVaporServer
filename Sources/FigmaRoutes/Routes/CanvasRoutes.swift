@@ -65,6 +65,13 @@ struct CanvasRoutes: RouteCollection {
             let frameWidth                 = (try? req.query.get(Int.self,    at: "width"))                      ?? 0
             let frameHeight                = (try? req.query.get(Int.self,    at: "height"))                     ?? 0
             let nodes = try req.content.decode([FigmaNode].self)
+            // Cache raw JSON for debug-export
+            if let rawData = req.body.data,
+               let rawObj = try? JSONSerialization.jsonObject(with: Data(rawData.readableBytesView)),
+               let pretty = try? JSONSerialization.data(withJSONObject: rawObj, options: [.prettyPrinted, .sortedKeys]),
+               let prettyStr = String(data: pretty, encoding: .utf8) {
+                await CanvasRawJsonCache.shared.store(prettyStr)
+            }
             let smooth = SmoothOptions(rectangle: smoothRectangle, roundedRectangle: smoothRoundedRectangle, ellipse: smoothEllipse, triangle: smoothTriangle, line: smoothLine)
             let frames = CanvasDesigner.mapToIR(nodes: nodes)
             let svgPairs = CanvasDesigner.extractSvgs(frames: frames)
@@ -216,6 +223,25 @@ struct CanvasRoutes: RouteCollection {
                 return Response(status: .noContent)
             }
             return Response(status: .ok, body: .init(string: code))
+        }
+
+        routes.get("canvas-py", "debug-export") { req -> Response in
+            let json   = await CanvasRawJsonCache.shared.fetch() ?? "(no data yet)"
+            let python = await CanvasPyCache.shared.fetch()     ?? "(no data yet)"
+            let body = """
+            json:
+            ```
+            \(json)
+            ```
+
+            python:
+            ```
+            \(python)
+            ```
+            """
+            var hdrs = HTTPHeaders()
+            hdrs.replaceOrAdd(name: .contentType, value: "text/plain; charset=utf-8")
+            return Response(status: .ok, headers: hdrs, body: .init(string: body))
         }
 
         routes.get("status") { req -> Response in

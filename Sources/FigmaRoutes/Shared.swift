@@ -32,6 +32,13 @@ actor CanvasPyCache {
     func fetch() -> String? { lastCode }
 }
 
+actor CanvasRawJsonCache {
+    static let shared = CanvasRawJsonCache()
+    private var lastJson: String? = nil
+    func store(_ json: String) { lastJson = json }
+    func fetch() -> String? { lastJson }
+}
+
 actor CanvasStream {
     static let shared = CanvasStream()
     private var subscribers: [UUID: AsyncStream<String>.Continuation] = [:]

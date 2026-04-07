@@ -15,13 +15,6 @@ public actor DeviceReloader {
     private static let imageName     = "kivy-device-preview"
     private static let containerName = "kivy-device-preview"
 
-    // workspace root: 5 levels up from this file → figma2kv/
-    private let workspaceRoot: URL = {
-        var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { url = url.deletingLastPathComponent() }
-        return url
-    }()
-
     private var deployed = false
     private var storedPort: Int?
     private var storedPreviewerPort: Int?
@@ -164,13 +157,28 @@ public actor DeviceReloader {
     // MARK: Private — Docker helpers
 
     private func buildImage() throws {
+        let fm = FileManager.default
+        let buildDir = fm.temporaryDirectory.appendingPathComponent("kivy-device-build-\(UUID().uuidString)")
+        try fm.createDirectory(at: buildDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: buildDir) }
+
+        try Self.embeddedDockerfile.write(
+            to: buildDir.appendingPathComponent("Dockerfile"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try Self.embeddedStartScript.write(
+            to: buildDir.appendingPathComponent("start-vnc-device.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
+
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         proc.arguments = ["docker", "build", "--no-cache",
                           "-t", Self.imageName,
-                          "-f", "kivy-device-preview/Dockerfile",
-                          "."]
-        proc.currentDirectoryURL = workspaceRoot
+                          buildDir.path]
         proc.standardOutput = FileHandle.standardOutput
         proc.standardError  = FileHandle.standardError
         try proc.run()
@@ -178,6 +186,96 @@ public actor DeviceReloader {
         guard proc.terminationStatus == 0 else { throw DeviceReloaderError.dockerBuildFailed }
         print("[DeviceReloader] Image '\(Self.imageName)' built.")
     }
+
+    // MARK: - Embedded Docker assets
+
+    private static let embeddedDockerfile = #"""
+FROM python:3.13-slim
+
+RUN apt-get update && apt-get install -y \
+    xvfb x11vnc novnc websockify \
+    openssl python3-dev libgl1 libgles2 \
+    libgstreamer1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    libmtdev1 libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 libsdl2-ttf-2.0-0 \
+    git curl ca-certificates xclip xsel procps \
+    x11-xserver-utils fontconfig \
+    fonts-noto-core fonts-roboto fonts-open-sans fonts-liberation fonts-ubuntu \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN pip install --no-cache-dir kivy pillow websockets
+
+RUN git clone --depth 1 --branch master https://github.com/Py-Swift/figma-kivy-previewer.git /tmp/figma-kivy-previewer \
+    && pip install --no-cache-dir /tmp/figma-kivy-previewer \
+    && rm -rf /tmp/figma-kivy-previewer
+
+WORKDIR /work
+
+ENV DISPLAY=:99
+ENV SDL_VIDEODRIVER=x11
+ENV PREVIEWER_IP=0.0.0.0
+ENV PREVIEWER_PORT=7654
+
+COPY start-vnc-device.sh /usr/local/bin/start-vnc-device.sh
+RUN chmod +x /usr/local/bin/start-vnc-device.sh
+
+EXPOSE 5900 6080 7654
+CMD ["/usr/local/bin/start-vnc-device.sh"]
+"""#
+
+    private static let embeddedStartScript = #"""
+#!/bin/bash
+set -e
+
+DISPLAY_WIDTH="${DISPLAY_WIDTH:-390}"
+DISPLAY_HEIGHT="${DISPLAY_HEIGHT:-844}"
+
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+
+echo "Starting Xvfb on display :99 at ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}..."
+Xvfb :99 -screen 0 ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}x24 -ac +extension GLX +render -noreset &
+sleep 2
+
+echo "Starting x11vnc..."
+x11vnc \
+    -display :99 \
+    -forever \
+    -shared \
+    -rfbport 5900 \
+    -nopw \
+    -xkb \
+    -ncache 0 \
+    -noxdamage \
+    -noxfixes \
+    -noxcomposite \
+    -skip_lockkeys \
+    -speeds lan \
+    -wait 5 \
+    -defer 5 \
+    -progressive 0 \
+    -q \
+    &
+sleep 2
+
+echo "Starting websockify (plain WS + noVNC files) on port 6080 -> VNC 5900..."
+websockify --web /usr/share/novnc 6080 localhost:5900 &
+
+echo "Starting figma-kivy-previewer on ws://0.0.0.0:${PREVIEWER_PORT}..."
+figma-kivy-previewer &
+
+echo "================================================"
+echo "Container Ready!"
+echo "================================================"
+echo "VNC Port:        5900"
+echo "noVNC Port:      6080"
+echo "Previewer WS:    ${PREVIEWER_PORT}"
+echo "================================================"
+
+wait
+"""#
 
     private func imageExists() -> Bool {
         let out = try? capture("docker", ["images", "-q", Self.imageName])

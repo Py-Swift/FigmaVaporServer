@@ -9,13 +9,6 @@ public actor CanvasReloader {
     private static let imageName     = "kivy-hot-reload"
     private static let containerName = "kivy-canvas-preview"
 
-    // workspace root: 6 levels up from this file → figma2kv/
-    private let workspaceRoot: URL = {
-        var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<6 { url = url.deletingLastPathComponent() }
-        return url
-    }()
-
     private var deployed = false
     private var storedNoVncPort: Int?
     private var storedPreviewerPort: Int?
@@ -238,11 +231,6 @@ public actor CanvasReloader {
             to: buildDir.appendingPathComponent("start-vnc.sh"),
             atomically: true, encoding: .utf8)
 
-        // 3. Copy the figma-kivy-previewer package into the build context as "fkp".
-        let fkpSrc = workspaceRoot.appendingPathComponent("figma-kivy-previewer/figma-kivy-previewer")
-        let fkpDst = buildDir.appendingPathComponent("fkp")
-        try fm.copyItem(at: fkpSrc, to: fkpDst)
-
         print("[CanvasReloader] Building Docker image '\(Self.imageName)' from temp context…")
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -277,8 +265,9 @@ ENV PATH="/root/.local/bin:$PATH"
 
 RUN pip install --no-cache-dir kivy pillow websockets
 
-COPY fkp /tmp/fkp
-RUN pip install --no-cache-dir /tmp/fkp && rm -rf /tmp/fkp
+RUN git clone --depth 1 --branch master https://github.com/Py-Swift/figma-kivy-previewer.git /tmp/figma-kivy-previewer \
+    && pip install --no-cache-dir /tmp/figma-kivy-previewer \
+    && rm -rf /tmp/figma-kivy-previewer
 
 WORKDIR /work
 
